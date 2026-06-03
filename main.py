@@ -1,4 +1,5 @@
 from math import sqrt
+from math import sin,cos
 from enum import Enum
 
 import pyray
@@ -57,7 +58,8 @@ class Msg:
 		self.fontsize = fontsize
 		self.active = True
 		self.timer = 135
-		self.offset = pyray.Vector2(20,-50)
+		self.offset = pyray.Vector2(20,-100)
+		self.alpha = 255
 
 
 	def update(self, player):
@@ -65,25 +67,47 @@ class Msg:
 		self.position.x = player.position.x+self.offset.x
 		self.position.y = player.position.y+self.offset.y
 
-		if self.timer > 0:
-
+		if self.timer > 67:
 			self.timer -= 1
 
-		else:
+		elif self.timer <= 67 and self.timer > 0:
+			self.timer -= 1
+			if self.alpha > 3: #not 0 because it breaks the alpha in the draw method
+				self.alpha -= 3
+			else:
+				self.alpha = 0
+
+		elif self.timer <= 0:
+			
+			self.timer = 0
 			self.active = False
+		
+	
 
 	def draw(self):
 
 		pyray.draw_text(self.text,int(self.position.x),
-									int(self.position.y),
-									int(self.fontsize),
-									BLACK)
+								int(self.position.y),
+								int(self.fontsize),
+								pyray.Color(0,0,0,self.alpha))
 
 class MsgManager:
 
 	def __init__(self, initlist,player):
 
 		self.list = initlist
+		self.player = player
+		self.deletion_timer = 120
+		self.deletion_init = self.deletion_timer
+
+	def _deletion_timer(self) -> bool:
+
+		if self.deletion_timer > 0:
+			self.deletion_timer -= 1
+			return False
+		else:
+			self.deletion_timer = self.deletion_init
+			return True
 
 	def addmsg(self,newlist):
 
@@ -92,14 +116,24 @@ class MsgManager:
 
 	def update(self):
 
+
+
 		for msg in self.list:
 			if msg.active:
-				msg.update(player)
+				msg.update(self.player)
+
+		if self._deletion_timer():
+			print("looking for inactive msgs")
+			for msg in self.list:
+				if not msg.active:
+					self.list.remove(msg)
+					print("removed: ",msg)
 
 	def draw(self):
 
 		for msg in self.list:
-			msg.draw()
+			if msg.active:
+				msg.draw()
 
 class Player:
 
@@ -171,13 +205,11 @@ class Piranha:
 	def check_collision(self,player):
 		selfvector = pyray.Vector2(self.position.x,self.position.y)
 		if pyray.check_collision_circle_rec(selfvector,self.size,player.rect):
+			player_dies(player,self.msgman,"You were bitten by a piranha!!",20)
 
-			newmsg = Msg("You DIED!",player.position,50)
-			self.msgman.addmsg([newmsg])
-			player._initposition()
 
 	def draw(self):
-		#print("hola me estoy dibujando: ", self.position.x, self.position.y)
+		
 		pyray.draw_circle_v(pyray.Vector2(self.position.x,self.position.y),
 							self.size,pyray.DARKPURPLE)
 
@@ -211,9 +243,43 @@ class EnvItem:
         self.rect = rect
         self.blocking = blocking
         self.color = color
+        
 
 
-def update_player(player, env_items, delta):
+class DamageEnv(EnvItem):
+
+    def __init__(self,rect,blocking):
+        super().__init__(rect,blocking,pyray.ORANGE)
+        self.damaging = True
+        self.wave_counter = 0.0
+    
+
+    def update(self):
+
+        if self.wave_counter < 6.28:
+            self.wave_counter += 0.08
+
+        else:
+            self.wave_counter = 0
+
+
+        self.rect.y += sin(self.wave_counter)*1.5
+
+def updateEnv(list):
+
+        for item in list:
+            if hasattr(item,"update"):
+                
+                item.update()
+
+
+def player_dies(player,msgman,message,fontsize):
+
+    newmsg = Msg(message,player.position,fontsize)
+    msgman.addmsg([newmsg])
+    player._initposition()    
+
+def update_player(player, env_items, delta,msgman):
     if pyray.is_key_down(pyray.KeyboardKey.KEY_LEFT):
         player.position.x -= PLAYER_HOR_SPD * delta
     if pyray.is_key_down(pyray.KeyboardKey.KEY_RIGHT):
@@ -235,6 +301,10 @@ def update_player(player, env_items, delta):
             hit_obstacle = True
             player.speed = 0.0
             p.y = ei.rect.y
+
+        if hasattr(ei,"damaging"):
+            if pyray.check_collision_recs(player.rect,ei.rect):
+                player_dies(player,msgman,"You died because of hot lava!!",20)
 
     if not hit_obstacle:
         player.position.y += player.speed * delta
@@ -371,6 +441,7 @@ msginit = Msg("Go to the right!",player,40)
 msgman = MsgManager([msginit],player)
 
 env_items = (
+	#Platforms and obstacles:
     EnvItem(pyray.Rectangle(0, 0, 1000, 400), 0, LIGHTGRAY),
     EnvItem(pyray.Rectangle(0, 400, 1000, 200), 1, GRAY),
     EnvItem(pyray.Rectangle(300, 200, 400, 10), 1, GRAY),
@@ -381,12 +452,14 @@ env_items = (
 	EnvItem(pyray.Rectangle(1250, 0, 50, 2000),1,BLACK),
 	EnvItem(pyray.Rectangle(1450, 0, 50, 2000),1,BLACK),
 	EnvItem(pyray.Rectangle(1650, 0, 50, 2000),1,BLACK),
-	EnvItem(pyray.Rectangle(1850, 0, 50, 2000),1,BLACK)
+	EnvItem(pyray.Rectangle(1850, 0, 50, 2000),1,BLACK),
+	#Damaging areas:
+	DamageEnv(pyray.Rectangle(-1000,450,6000,500),0)
 )
 
-piranha1 = Piranha(pyray.Vector2(1525,300),3,EnemyState.ALIVE,0,msgman)
-piranha2 = Piranha(pyray.Vector2(1725,300),3,EnemyState.ALIVE,30,msgman)
-piranha3 = Piranha(pyray.Vector2(1785,300),4,EnemyState.ALIVE,0,msgman)
+piranha1 = Piranha(pyray.Vector2(1525,480),3,EnemyState.ALIVE,0,msgman)
+piranha2 = Piranha(pyray.Vector2(1725,480),3,EnemyState.ALIVE,30,msgman)
+piranha3 = Piranha(pyray.Vector2(1785,480),4,EnemyState.ALIVE,0,msgman)
 
 enemygroupMain = EnemyGroup([piranha1,piranha2,piranha3])
 
@@ -423,10 +496,12 @@ while not pyray.window_should_close():  # Detect window close button or ESC key
     # Update
     delta_time = pyray.get_frame_time()
 
-    update_player(player, env_items, delta_time)
+    update_player(player, env_items, delta_time,msgman)
+    updateEnv(env_items)
     msgman.update()
     player.update()
     enemygroupMain.update(player)
+
 
     camera.zoom += pyray.get_mouse_wheel_move() * 0.05
 
